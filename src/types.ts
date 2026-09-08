@@ -37,24 +37,6 @@ export interface PerkActionPayload {
   minutesToAdd?: number;
 }
 
-export interface VoteResult {
-  candidateVotes: Record<string, number>;
-  eliminatedPlayerId: string | null;
-  eliminatedPlayerName?: string;
-  goldenParachuteSavedId?: string | null;
-  immunityProtectedIds?: string[];
-  tiedPlayerIds?: string[];
-  summaryMessage: string;
-}
-
-export interface VotingState {
-  isActive: boolean;
-  roundNumber: number;
-  votes: Record<string, string>; // voterId -> targetCandidateId
-  isConcluded?: boolean;
-  result?: VoteResult | null;
-}
-
 export interface GameSession {
   generation_id: number;
   createdAt: string;
@@ -62,7 +44,6 @@ export interface GameSession {
   perksPerPlayer: number;
   world: WorldCard[];
   players: Player[];
-  voting?: VotingState | null;
 }
 
 export interface DeckCard {

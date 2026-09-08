@@ -62,8 +62,8 @@ export function HostLogin({ onLogin, onCancel }: HostLoginProps) {
             />
             <KeyRound className="w-4 h-4 text-slate-500 absolute right-3.5 top-3" />
           </div>
-          <p className="text-[11px] text-slate-500 mt-1.5">
-            Пароль по умолчанию: <span className="font-mono text-slate-400 bg-slate-800 px-1 py-0.5 rounded">YA2077</span>
+          <p className="text-[11px] text-amber-400/90 mt-1.5 font-medium">
+            ай ай ай, зачем тебе сюда?
           </p>
         </div>
 

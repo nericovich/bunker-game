@@ -10,9 +10,7 @@ export interface PerkConfig {
     | 'revive_player'
     | 'add_status'
     | 'reveal_card'
-    | 'reset_voting'
     | 'undo_perk'
-    | 'start_voting'
     | 'add_timer';
   category?: string;
   defaultStatus?: string;
@@ -30,11 +28,13 @@ export function getPerkConfig(card: Card): PerkConfig {
   const t = `${card.title} ${card.description}`.toLowerCase();
 
   // 1. Code Review (План Б)
-  if (t.includes('code review') || t.includes('переголосовывают')) {
+  if (t.includes('code review') || t.includes('переголосовывают') || t.includes('план б')) {
     return {
-      actionType: 'reset_voting',
-      actionButtonText: 'Отменить результаты голосования',
-      actionExplanation: 'Сбросит результаты текущего голосования. Все выбывшие игроки в этом круге возвращаются за стол для переголосования.',
+      actionType: 'add_status',
+      defaultStatus: '🔄 План Б (Code Review): Пересмотр решения раунда',
+      requiresTarget: true,
+      actionButtonText: 'Применить Code Review',
+      actionExplanation: 'Даёт возможность оспорить или пересмотреть решение текущего раунда.',
     };
   }
 
@@ -304,11 +304,12 @@ export function getPerkConfig(card: Card): PerkConfig {
   }
 
   // 29. Деплой в прод без тестов
-  if (t.includes('без тестов') || t.includes('немедленный переход к голосованию') || t.includes('деплой в прод')) {
+  if (t.includes('без тестов') || t.includes('немедленный переход') || t.includes('деплой в прод')) {
     return {
-      actionType: 'start_voting',
-      actionButtonText: 'Немедленно начать голосование',
-      actionExplanation: 'Прерывает время обсуждения и немедленно объявляет раунд голосования на выбывание!',
+      actionType: 'add_status',
+      defaultStatus: '⚡ Деплой в прод без тестов: Экстренное завершение раунда обсуждения',
+      actionButtonText: 'Активировать деплой в прод',
+      actionExplanation: 'Объявляет экстренное завершение текущего раунда обсуждения и переход к следующей фазе игры!',
     };
   }
 

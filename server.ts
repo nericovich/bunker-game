@@ -71,24 +71,12 @@ function saveSession(session: any) {
   }
 }
 
-// Helper to shuffle & draw safely
-function drawRandomSample<T>(array: T[], count: number): T[] {
-  if (!array || array.length === 0 || count <= 0) {
-    return [];
-  }
-  const shuffled = [...array].sort(() => Math.random() - 0.5);
-  if (count <= shuffled.length) {
-    return shuffled.slice(0, count);
-  }
-  // If pool smaller than count, fill with random picks
-  const result: T[] = [...shuffled];
-  while (result.length < count) {
-    const picked = shuffled[Math.floor(Math.random() * shuffled.length)];
-    if (picked) {
-      result.push(picked);
-    } else {
-      break;
-    }
+// Fisher-Yates unbiased shuffle
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
 }
@@ -99,6 +87,57 @@ function getRandomCard(category: string) {
     return { category, title: `${category} (Базовый)`, description: 'Информация засекречена' };
   }
   return pool[Math.floor(Math.random() * pool.length)] || { category, title: `${category} (Базовый)`, description: 'Информация засекречена' };
+}
+
+// Get all card titles currently held by all players across all categories
+function getUsedCardTitles(session: any): Record<string, Set<string>> {
+  const used: Record<string, Set<string>> = {
+    'Профессия': new Set(),
+    'Биология': new Set(),
+    'Здоровье': new Set(),
+    'Хобби': new Set(),
+    'Багаж': new Set(),
+    'Факт': new Set(),
+    'Перк': new Set(),
+  };
+
+  if (!session || !session.players) return used;
+
+  for (const player of session.players) {
+    for (const card of player.cards || []) {
+      if (card.label?.startsWith('Перк')) {
+        used['Перк'].add(card.title);
+      } else if (used[card.label]) {
+        used[card.label].add(card.title);
+      }
+    }
+  }
+
+  return used;
+}
+
+// Draw a strictly unique card for a given category, ensuring no duplicates across players
+function drawUniqueCard(category: string, usedSet?: Set<string>): { category: string; title: string; description: string } {
+  const pool = cardsDeck[category] || [];
+  if (!pool.length) {
+    return { category, title: `${category} (Базовый)`, description: 'Информация засекречена' };
+  }
+
+  // Filter pool by unused titles to guarantee zero overlap among players
+  const available = usedSet ? pool.filter((c: any) => !usedSet.has(c.title)) : pool;
+
+  if (available.length > 0) {
+    const shuffledAvailable = shuffleArray(available);
+    const chosen = shuffledAvailable[0];
+    if (usedSet) {
+      usedSet.add(chosen.title);
+    }
+    return chosen;
+  }
+
+  // If pool runs out (e.g. game exceeds pool size), fall back to safe random
+  const fallback = pool[Math.floor(Math.random() * pool.length)];
+  return fallback;
 }
 
 function generateGameSession(playerCount: number, perksPerPlayer: number) {
@@ -146,22 +185,22 @@ function generateGameSession(playerCount: number, perksPerPlayer: number) {
     players: [] as any[],
   };
 
-  // Draw category cards for all players
-  const drawnByCategory: Record<string, any[]> = {};
-  for (const cat of playerCategories) {
-    drawnByCategory[cat] = drawRandomSample(cardsDeck[cat] || [], playerCount);
-  }
-
-  const drawnPerks = drawRandomSample(cardsDeck['Перк'] || [], playerCount * perksPerPlayer);
+  // Track used card titles across all players so characteristics NEVER overlap
+  const usedTitles: Record<string, Set<string>> = {
+    'Профессия': new Set(),
+    'Биология': new Set(),
+    'Здоровье': new Set(),
+    'Хобби': new Set(),
+    'Багаж': new Set(),
+    'Факт': new Set(),
+    'Перк': new Set(),
+  };
 
   for (let pIdx = 0; pIdx < playerCount; pIdx++) {
     const cards: any[] = [];
     for (let cIdx = 0; cIdx < playerCategories.length; cIdx++) {
       const cat = playerCategories[cIdx];
-      const drawn = (drawnByCategory[cat] && drawnByCategory[cat][pIdx]) || {
-        title: `${cat} ${pIdx + 1}`,
-        description: 'Характеристика участника экспедиции',
-      };
+      const drawn = drawUniqueCard(cat, usedTitles[cat]);
       cards.push({
         id: `p${pIdx + 1}_card${cIdx + 1}`,
         label: cat,
@@ -171,20 +210,17 @@ function generateGameSession(playerCount: number, perksPerPlayer: number) {
       });
     }
 
-    const perksStart = pIdx * perksPerPlayer;
-    const perksEnd = perksStart + perksPerPlayer;
-    const playerPerks = drawnPerks.slice(perksStart, perksEnd);
-
-    playerPerks.forEach((perk, perkNum) => {
+    for (let perkNum = 0; perkNum < perksPerPlayer; perkNum++) {
+      const drawnPerk = drawUniqueCard('Перк', usedTitles['Перк']);
       cards.push({
         id: `p${pIdx + 1}_perk${perkNum + 1}`,
         label: `Перк ${perkNum + 1}`,
-        title: perk?.title || `Перк ${perkNum + 1}`,
-        description: perk?.description || 'Специальное игровое действие',
+        title: drawnPerk.title,
+        description: drawnPerk.description,
         perk_used: false,
         revealed: false,
       });
-    });
+    }
 
     session.players.push({
       id: `player_${pIdx + 1}`,
@@ -192,6 +228,7 @@ function generateGameSession(playerCount: number, perksPerPlayer: number) {
       cards,
       isEliminated: false,
       inBunker: false,
+      statuses: [],
     });
   }
 
@@ -364,7 +401,8 @@ async function startServer() {
       case 'reroll_own_card': {
         const target = session.players.find((p: any) => p.id === targetPlayerId);
         if (target && category) {
-          const newCard = getRandomCard(category);
+          const usedTitles = getUsedCardTitles(session);
+          const newCard = drawUniqueCard(category, usedTitles[category]);
           const cardToReplace = target.cards.find((c: any) => c.label === category);
           if (cardToReplace) {
             cardToReplace.title = newCard.title;
@@ -401,12 +439,13 @@ async function startServer() {
 
       case 'reroll_all_category': {
         if (category) {
-          const freshCards = drawRandomSample(cardsDeck[category] || [], session.players.length);
-          session.players.forEach((p: any, idx: number) => {
+          const usedSet = new Set<string>();
+          session.players.forEach((p: any) => {
             const card = p.cards.find((c: any) => c.label === category);
-            if (card && freshCards[idx]) {
-              card.title = freshCards[idx].title;
-              card.description = freshCards[idx].description;
+            if (card) {
+              const freshCard = drawUniqueCard(category, usedSet);
+              card.title = freshCard.title;
+              card.description = freshCard.description;
               card.revealed = true;
             }
           });
@@ -450,33 +489,6 @@ async function startServer() {
         break;
       }
 
-      case 'reset_voting': {
-        session.players.forEach((p: any) => {
-          p.isEliminated = false;
-        });
-        if (session.voting) {
-          session.voting.isActive = true;
-          session.voting.isConcluded = false;
-          session.voting.votes = {};
-          session.voting.result = null;
-        }
-        actionLog = 'Результаты голосования отменены перком «Code Review»! Все переголосовывают.';
-        break;
-      }
-
-      case 'start_voting': {
-        const roundNumber = (session.voting?.roundNumber || 0) + 1;
-        session.voting = {
-          isActive: true,
-          roundNumber,
-          votes: {},
-          isConcluded: false,
-          result: null,
-        };
-        actionLog = 'Перк «Деплой в прод без тестов»: Немедленный переход к голосованию!';
-        break;
-      }
-
       default:
         actionLog = `Перк «${foundPerk?.title || perkId}» применён`;
     }
@@ -504,264 +516,90 @@ async function startServer() {
     res.json({ session });
   });
 
-  // --- Voting Endpoints ---
+  // --- Dynamic Players Management (Add & Remove mid-game) ---
 
-  function getVoterWeight(player: any): number {
-    if (player.isEliminated) return 0;
-    const statuses = (player.statuses || []).map((s: string) => s.toLowerCase());
-    if (statuses.some((s: string) => s.includes('лишён права голоса') || s.includes('лишен права голоса') || s.includes('лишён голоса'))) {
-      return 0;
-    }
-    let weight = 1;
-    if (statuses.some((s: string) => s.includes('+2 голос') || s.includes('+2 дополнительн'))) {
-      weight += 2;
-    }
-    if (statuses.some((s: string) => s.includes('парное программирование') || s.includes('x2 голос'))) {
-      weight *= 2;
-    }
-    return weight;
-  }
-
-  function isCandidateImmune(player: any): boolean {
-    if (player.isEliminated) return true;
-    const statuses = (player.statuses || []).map((s: string) => s.toLowerCase());
-    return statuses.some((s: string) =>
-      s.includes('тайный оффер') ||
-      s.includes('иммунитет от увольнения') ||
-      s.includes('забастовка') ||
-      s.includes('защита от голосования') ||
-      s.includes('овертайм') ||
-      s.includes('защищён овертаймом')
-    );
-  }
-
-  // Start voting round
-  app.post('/api/voting/start', (req, res) => {
-    const session = loadSession();
-    if (!session) return res.status(404).json({ error: 'No active session' });
-
-    const roundNumber = (session.voting?.roundNumber || 0) + 1;
-    session.voting = {
-      isActive: true,
-      roundNumber,
-      votes: {},
-      isConcluded: false,
-      result: null,
-    };
-
-    saveSession(session);
-    res.json({ session });
-  });
-
-  // Submit or update a vote
-  app.post('/api/voting/vote', (req, res) => {
-    const { voterId, candidateId } = req.body;
-    const session = loadSession();
-    if (!session || !session.voting || !session.voting.isActive) {
-      return res.status(400).json({ error: 'Voting is not active' });
-    }
-
-    const voter = session.players.find((p: any) => p.id === voterId);
-    if (!voter || voter.isEliminated) {
-      return res.status(400).json({ error: 'Invalid voter' });
-    }
-
-    if (getVoterWeight(voter) <= 0) {
-      return res.status(400).json({ error: 'Player has no voting rights in this round' });
-    }
-
-    const candidate = session.players.find((p: any) => p.id === candidateId);
-    if (!candidate || candidate.isEliminated) {
-      return res.status(400).json({ error: 'Invalid candidate' });
-    }
-
-    if (isCandidateImmune(candidate)) {
-      return res.status(400).json({ error: 'Candidate has immunity from perk' });
-    }
-
-    session.voting.votes[voterId] = candidateId;
-    saveSession(session);
-    res.json({ session });
-  });
-
-  // Batch submit votes (from Host panel)
-  app.post('/api/voting/bulk-votes', (req, res) => {
-    const { votes } = req.body;
-    const session = loadSession();
-    if (!session || !session.voting || !session.voting.isActive) {
-      return res.status(400).json({ error: 'Voting is not active' });
-    }
-
-    session.voting.votes = { ...session.voting.votes, ...votes };
-    saveSession(session);
-    res.json({ session });
-  });
-
-  // Tally votes taking perks into account
-  app.post('/api/voting/tally', (req, res) => {
-    const session = loadSession();
-    if (!session || !session.voting) {
-      return res.status(400).json({ error: 'No voting in progress' });
-    }
-
-    const candidateVotes: Record<string, number> = {};
-    session.players.forEach((p: any) => {
-      if (!p.isEliminated) candidateVotes[p.id] = 0;
-    });
-
-    Object.entries(session.voting.votes || {}).forEach(([voterId, candidateId]: [string, any]) => {
-      const voter = session.players.find((p: any) => p.id === voterId);
-      if (!voter || voter.isEliminated) return;
-      const weight = getVoterWeight(voter);
-      if (weight <= 0) return;
-
-      const candidate = session.players.find((p: any) => p.id === candidateId);
-      if (!candidate || candidate.isEliminated || isCandidateImmune(candidate)) return;
-
-      candidateVotes[candidateId] = (candidateVotes[candidateId] || 0) + weight;
-    });
-
-    const sorted = Object.entries(candidateVotes)
-      .map(([id, count]) => ({
-        id,
-        player: session.players.find((p: any) => p.id === id),
-        count,
-      }))
-      .sort((a, b) => b.count - a.count);
-
-    if (sorted.length === 0 || sorted[0].count === 0) {
-      session.voting.result = {
-        candidateVotes,
-        eliminatedPlayerId: null,
-        summaryMessage: 'Голосов пока не подано или все голоса отданы за защищённых игроков.',
-      };
-      session.voting.isConcluded = true;
-      saveSession(session);
-      return res.json({ session });
-    }
-
-    const top = sorted[0];
-    const tied = sorted.filter((c) => c.count === top.count);
-
-    if (tied.length > 1) {
-      const tiedNames = tied.map((c) => c.player?.name).join(' и ');
-      session.voting.result = {
-        candidateVotes,
-        eliminatedPlayerId: null,
-        tiedPlayerIds: tied.map((c) => c.id),
-        summaryMessage: `Ничья! Игроки ${tiedNames} набрали по ${top.count} голосов. Требуется переголосование или решающее слово ведущего.`,
-      };
-      session.voting.isConcluded = true;
-      saveSession(session);
-      return res.json({ session });
-    }
-
-    // Check Golden Parachute on top candidate
-    const topStatuses = (top.player?.statuses || []).map((s: string) => s.toLowerCase());
-    const hasParachute = topStatuses.some((s: string) => s.includes('золотой парашют'));
-
-    if (hasParachute) {
-      const nextCandidates = sorted.slice(1).filter((c) => c.count > 0);
-      if (nextCandidates.length === 0) {
-        session.voting.result = {
-          candidateVotes,
-          eliminatedPlayerId: null,
-          goldenParachuteSavedId: top.id,
-          summaryMessage: `Игрок ${top.player?.name} набрал большинство (${top.count}), но спасён перком «Золотой парашют»! Больше ни за кого голосов нет.`,
-        };
-      } else {
-        const nextTop = nextCandidates[0];
-        const nextTied = nextCandidates.filter((c) => c.count === nextTop.count);
-        if (nextTied.length > 1) {
-          const nextTiedNames = nextTied.map((c) => c.player?.name).join(' и ');
-          session.voting.result = {
-            candidateVotes,
-            eliminatedPlayerId: null,
-            goldenParachuteSavedId: top.id,
-            tiedPlayerIds: nextTied.map((c) => c.id),
-            summaryMessage: `Перк «Золотой парашют» спас игрока ${top.player?.name}! Следующие по голосам (${nextTiedNames}) имеют ничью по ${nextTop.count} голосов.`,
-          };
-        } else {
-          session.voting.result = {
-            candidateVotes,
-            eliminatedPlayerId: nextTop.id,
-            eliminatedPlayerName: nextTop.player?.name,
-            goldenParachuteSavedId: top.id,
-            summaryMessage: `Перк «Золотой парашют» спас игрока ${top.player?.name}! Бункер покидает следующий кандидат: ${nextTop.player?.name} (${nextTop.count} голосов).`,
-          };
-        }
+  // Add a player during an active game with strictly non-overlapping cards
+  app.post('/api/players/add', (req, res) => {
+    try {
+      const session = loadSession();
+      if (!session) {
+        return res.status(404).json({ error: 'Партия ещё не создана' });
       }
-      session.voting.isConcluded = true;
-      saveSession(session);
-      return res.json({ session });
-    }
 
-    session.voting.result = {
-      candidateVotes,
-      eliminatedPlayerId: top.id,
-      eliminatedPlayerName: top.player?.name,
-      summaryMessage: `Большинством голосов (${top.count}) бункер покидает: ${top.player?.name}.`,
-    };
-    session.voting.isConcluded = true;
-    saveSession(session);
-    res.json({ session });
-  });
+      const playerCategories = ['Профессия', 'Биология', 'Здоровье', 'Хобби', 'Багаж', 'Факт'];
+      const perksCount = session.perksPerPlayer ?? 2;
 
-  // Apply elimination from voting
-  app.post('/api/voting/apply-elimination', (req, res) => {
-    const session = loadSession();
-    if (!session || !session.voting || !session.voting.result) {
-      return res.status(400).json({ error: 'No voting result to apply' });
-    }
+      // Find all currently held card titles to prevent any overlap
+      const usedTitles = getUsedCardTitles(session);
 
-    const { eliminatedPlayerId, goldenParachuteSavedId } = session.voting.result;
+      const nextPlayerNumber = session.players.length + 1;
+      const customName = req.body?.name?.trim();
+      const playerName = customName || `Игрок ${nextPlayerNumber}`;
+      const newPlayerId = `player_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
-    // Consume Golden Parachute from saved player
-    if (goldenParachuteSavedId) {
-      const savedPlayer = session.players.find((p: any) => p.id === goldenParachuteSavedId);
-      if (savedPlayer && savedPlayer.statuses) {
-        savedPlayer.statuses = savedPlayer.statuses.filter((s: string) => !s.toLowerCase().includes('золотой парашют'));
-      }
-    }
-
-    // Eliminate target player
-    if (eliminatedPlayerId) {
-      const target = session.players.find((p: any) => p.id === eliminatedPlayerId);
-      if (target) {
-        target.isEliminated = true;
-        target.inBunker = false;
-      }
-    }
-
-    // Remove single-round voting restriction statuses
-    session.players.forEach((p: any) => {
-      if (p.statuses) {
-        p.statuses = p.statuses.filter((s: string) => {
-          const lower = s.toLowerCase();
-          return !lower.includes('лишён права голоса') && !lower.includes('заглушен в чате');
+      const cards: any[] = [];
+      for (let cIdx = 0; cIdx < playerCategories.length; cIdx++) {
+        const cat = playerCategories[cIdx];
+        const drawn = drawUniqueCard(cat, usedTitles[cat]);
+        cards.push({
+          id: `${newPlayerId}_card${cIdx + 1}`,
+          label: cat,
+          title: drawn.title,
+          description: drawn.description,
+          revealed: false,
         });
       }
-    });
 
-    session.voting.isActive = false;
-    saveSession(session);
-    res.json({ session });
+      for (let perkNum = 0; perkNum < perksCount; perkNum++) {
+        const drawnPerk = drawUniqueCard('Перк', usedTitles['Перк']);
+        cards.push({
+          id: `${newPlayerId}_perk${perkNum + 1}`,
+          label: `Перк ${perkNum + 1}`,
+          title: drawnPerk.title,
+          description: drawnPerk.description,
+          perk_used: false,
+          revealed: false,
+        });
+      }
+
+      const newPlayer = {
+        id: newPlayerId,
+        name: playerName,
+        cards,
+        isEliminated: false,
+        inBunker: false,
+        statuses: [],
+      };
+
+      session.players.push(newPlayer);
+      session.playerCount = session.players.length;
+
+      saveSession(session);
+      res.json({ session, newPlayer });
+    } catch (err: any) {
+      console.error('[Bunker IT] Error adding player:', err);
+      res.status(500).json({ error: err?.message || 'Не удалось добавить игрока' });
+    }
   });
 
-  // Reset or cancel voting
-  app.post('/api/voting/cancel', (req, res) => {
-    const session = loadSession();
-    if (!session) return res.status(404).json({ error: 'No active session' });
+  // Remove a player from the game
+  app.post('/api/players/remove', (req, res) => {
+    try {
+      const { playerId } = req.body;
+      const session = loadSession();
+      if (!session) {
+        return res.status(404).json({ error: 'Партия ещё не создана' });
+      }
 
-    if (session.voting) {
-      session.voting.isActive = false;
-      session.voting.isConcluded = false;
-      session.voting.votes = {};
-      session.voting.result = null;
+      session.players = session.players.filter((p: any) => p.id !== playerId);
+      session.playerCount = session.players.length;
+
+      saveSession(session);
+      res.json({ session });
+    } catch (err: any) {
+      console.error('[Bunker IT] Error removing player:', err);
+      res.status(500).json({ error: err?.message || 'Не удалось удалить игрока' });
     }
-
-    saveSession(session);
-    res.json({ session });
   });
 
   // Vite integration

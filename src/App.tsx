@@ -7,8 +7,6 @@ import { HostLogin } from './components/HostLogin';
 import { DeckViewerModal } from './components/DeckViewerModal';
 import { GameRulesModal } from './components/GameRulesModal';
 import { RoundTimer } from './components/RoundTimer';
-import { VotingBanner } from './components/VotingBanner';
-import { VotingModal } from './components/VotingModal';
 import { BookCheck, AlertCircle, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -25,7 +23,6 @@ export default function App() {
   const [showDeckModal, setShowDeckModal] = useState<boolean>(false);
   const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
   const [showTimer, setShowTimer] = useState<boolean>(false);
-  const [isVotingModalOpen, setIsVotingModalOpen] = useState<boolean>(false);
 
   const lastGenIdRef = useRef<number | null>(null);
 
@@ -270,17 +267,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Active Voting Banner */}
-        {session && session.voting?.isActive && (
-          <div className="mb-6">
-            <VotingBanner
-              session={session}
-              role={role}
-              onOpenVoting={() => setIsVotingModalOpen(true)}
-            />
-          </div>
-        )}
-
+        {/* Active Game Display */}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
             <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
@@ -363,16 +350,6 @@ export default function App() {
       </footer>
 
       {/* Modals */}
-      {session && (
-        <VotingModal
-          isOpen={isVotingModalOpen}
-          role={role}
-          session={session}
-          onClose={() => setIsVotingModalOpen(false)}
-          onUpdateSession={handleUpdateSession}
-        />
-      )}
-
       <DeckViewerModal
         isOpen={showDeckModal}
         onClose={() => setShowDeckModal(false)}

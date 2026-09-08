@@ -3,7 +3,6 @@ import { Card, GameSession, Player } from '../types';
 import { WorldSection } from './WorldSection';
 import { PlayerCardItem } from './PlayerCardItem';
 import { PerkActionModal } from './PerkActionModal';
-import { VotingModal } from './VotingModal';
 import {
   RotateCw,
   Trash2,
@@ -19,7 +18,8 @@ import {
   Sparkles,
   Layers,
   Info,
-  Vote,
+  UserPlus,
+  X,
 } from 'lucide-react';
 
 interface HostPanelProps {
@@ -48,18 +48,65 @@ export function HostPanel({
   const [editingName, setEditingName] = useState('');
   const [activePerkModal, setActivePerkModal] = useState<{ card: Card; owner: Player } | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const [isVotingModalOpen, setIsVotingModalOpen] = useState(false);
+  const [isAddPlayerModalOpen, setIsAddPlayerModalOpen] = useState(false);
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const [isAddingPlayer, setIsAddingPlayer] = useState(false);
+  const [isRemovingPlayerId, setIsRemovingPlayerId] = useState<string | null>(null);
 
-  const handleStartVoting = async () => {
+  const handleAddPlayer = async () => {
+    if (!session) return;
     try {
-      const res = await fetch('/api/voting/start', { method: 'POST' });
+      setIsAddingPlayer(true);
+      const res = await fetch('/api/players/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newPlayerName.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Не удалось добавить игрока');
+      }
       const data = await res.json();
       if (data.session) {
         await onUpdateSession(data.session);
-        setIsVotingModalOpen(true);
+        setActionNotice(`Игрок «${data.newPlayer?.name || 'Новый игрок'}» успешно добавлен с уникальным набором карт!`);
+        setNewPlayerName('');
+        setIsAddPlayerModalOpen(false);
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err: any) {
+      console.error(err);
+      setActionNotice(`Ошибка: ${err.message || 'Не удалось добавить игрока'}`);
+    } finally {
+      setIsAddingPlayer(false);
+    }
+  };
+
+  const handleRemovePlayer = async (player: Player) => {
+    if (!session) return;
+    if (!window.confirm(`Удалить игрока «${player.name}» из партии? Его карты освободятся в колоду.`)) {
+      return;
+    }
+    try {
+      setIsRemovingPlayerId(player.id);
+      const res = await fetch('/api/players/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: player.id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Не удалось удалить игрока');
+      }
+      const data = await res.json();
+      if (data.session) {
+        await onUpdateSession(data.session);
+        setActionNotice(`Игрок «${player.name}» удалён из партии.`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setActionNotice(`Ошибка: ${err.message || 'Не удалось удалить игрока'}`);
+    } finally {
+      setIsRemovingPlayerId(null);
     }
   };
 
@@ -321,59 +368,27 @@ export function HostPanel({
             </div>
           </div>
 
-          {/* Voting Announcement Section */}
-          <div className="bg-gradient-to-r from-rose-950/80 via-slate-900/90 to-rose-950/80 border border-rose-800/80 rounded-xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <Vote className="w-5 h-5 text-rose-400" />
-                <h3 className="font-bold text-white text-sm sm:text-base">
-                  {session.voting?.isActive
-                    ? `Идёт голосование (Раунд #${session.voting.roundNumber})`
-                    : 'Голосование за исключение из бункера'}
-                </h3>
-                {session.voting?.isActive && (
-                  <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold uppercase animate-pulse">
-                    Активно
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {session.voting?.isActive
-                  ? `Подано голосов: ${Object.keys(session.voting.votes || {}).length} из ${session.players.filter((p) => !p.isEliminated).length}. Нажмите, чтобы распределить голоса и подвести итоги с учётом перков.`
-                  : 'Ведущий объявляет раунд голосования. Система автоматически рассчитывает иммунитеты, перки «Купить лидов», «Золотой парашют», «Парное программирование» и др.'}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              {session.voting?.isActive ? (
-                <button
-                  onClick={() => setIsVotingModalOpen(true)}
-                  className="py-2 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-lg shadow-rose-950 transition-all cursor-pointer"
-                >
-                  <Vote className="w-4 h-4" />
-                  <span>Управление голосованием</span>
-                </button>
-              ) : (
-                <button
-                  onClick={handleStartVoting}
-                  className="py-2 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-lg shadow-rose-950 transition-all cursor-pointer hover:scale-105"
-                >
-                  <Vote className="w-4 h-4" />
-                  <span>Объявить голосование</span>
-                </button>
-              )}
-            </div>
-          </div>
-
           {/* Players Management */}
           <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-2">
                 <span className="text-xl">🪪</span>
                 <h2 className="text-lg font-bold text-slate-100 uppercase tracking-wide">
                   Карты игроков ({session.players.length})
                 </h2>
+                <span className="text-xs text-emerald-400 font-medium px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/60 hidden sm:inline-flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Уникальные характеристики
+                </span>
               </div>
+
+              <button
+                onClick={() => setIsAddPlayerModalOpen(true)}
+                className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950 transition-all cursor-pointer hover:scale-[1.02]"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Добавить игрока в партию</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -502,6 +517,16 @@ export function HostPanel({
                             <Skull className="w-3 h-3" />
                             <span>{player.isEliminated ? 'Исключён ✕' : 'Исключить'}</span>
                           </button>
+
+                          <button
+                            onClick={() => handleRemovePlayer(player)}
+                            disabled={isRemovingPlayerId === player.id}
+                            className="px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors bg-slate-800 hover:bg-rose-950/70 text-slate-400 hover:text-rose-300 border border-slate-700/50"
+                            title="Удалить игрока из партии"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Удалить</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -545,15 +570,84 @@ export function HostPanel({
         />
       )}
 
-      {/* Voting Modal */}
-      {session && (
-        <VotingModal
-          isOpen={isVotingModalOpen}
-          role="host"
-          session={session}
-          onClose={() => setIsVotingModalOpen(false)}
-          onUpdateSession={onUpdateSession}
-        />
+      {/* Add Player Mid-Game Modal */}
+      {isAddPlayerModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-950 border border-emerald-800 text-emerald-400 flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Добавить нового игрока</h3>
+                  <p className="text-xs text-slate-400">По ходу текущей партии</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAddPlayerModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Имя нового участника:
+                </label>
+                <input
+                  type="text"
+                  placeholder={`Игрок ${(session?.players?.length || 0) + 1}`}
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddPlayer()}
+                  autoFocus
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs text-slate-400 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Гарантия уникальности карт</span>
+                </div>
+                <p>
+                  Игроку будут автоматически выданы 6 базовых характеристик (Профессия, Биология, Здоровье, Хобби, Багаж, Факт) и {session?.perksPerPlayer ?? 2} перка. Ни одна из выданных карт не будет повторять характеристики уже находящихся за столом участников!
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAddPlayerModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleAddPlayer}
+                disabled={isAddingPlayer}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isAddingPlayer ? (
+                  <>
+                    <RotateCw className="w-4 h-4 animate-spin" />
+                    <span>Вытягиваем карты...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    <span>Добавить за стол</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
