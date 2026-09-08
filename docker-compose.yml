@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  bunker-it:
+    build: .
+    container_name: bunker-it
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - BUNKER_GM_PASSWORD=YA2077
+      - DATA_DIR=/app/data
+    volumes:
+      - bunker_data:/app/data
+
+volumes:
+  bunker_data:
