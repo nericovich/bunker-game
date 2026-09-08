@@ -105,16 +105,26 @@ export default function App() {
   const handleGenerateSession = async (playerCount: number, perksPerPlayer: number) => {
     try {
       setIsRefreshing(true);
+      setError(null);
       const res = await fetch('/api/session/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerCount, perksPerPlayer }),
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
       const data = await res.json();
-      setSession(data.session);
-    } catch (e) {
+      if (data.session) {
+        setSession(data.session);
+        setError(null);
+      } else {
+        throw new Error('Сервер не вернул данные партии');
+      }
+    } catch (e: any) {
       console.error(e);
-      setError('Ошибка при генерации партии');
+      setError(`Ошибка при генерации партии: ${e?.message || 'Неизвестная ошибка'}`);
     } finally {
       setIsRefreshing(false);
     }

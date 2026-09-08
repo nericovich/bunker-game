@@ -2,27 +2,43 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { cardsDeck as embeddedCardsDeck } from './src/data/cardsData.ts';
 
 const appDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 const PORT = Number(process.env.PORT) || 3000;
-const dataDir = process.env.DATA_DIR || appDir;
+const dataDir = process.env.DATA_DIR || process.cwd();
 const STATE_FILE = path.join(dataDir, '.bunker_session.json');
-const CARDS_FILE = path.join(appDir, 'src', 'data', 'cards.json');
 const GM_PASSWORD = process.env.BUNKER_GM_PASSWORD || 'YA2077';
 
-// Load cards deck
-let cardsDeck: Record<string, Array<{ category: string; title: string; description: string }>> = {};
-try {
-  if (fs.existsSync(CARDS_FILE)) {
-    const raw = fs.readFileSync(CARDS_FILE, 'utf-8');
-    cardsDeck = JSON.parse(raw);
-    console.log('[Bunker IT] Loaded cards database with', Object.keys(cardsDeck).length, 'categories');
-  } else {
-    console.warn('[Bunker IT] cards.json not found at', CARDS_FILE);
+// Load cards deck with embedded fallback so Docker/VPS/Cloud Run never fail
+let cardsDeck: Record<string, Array<{ category: string; title: string; description: string }>> = {
+  ...embeddedCardsDeck,
+};
+
+// Also check potential file paths for cards.json if present on disk
+const candidatePaths = [
+  path.join(process.cwd(), 'src', 'data', 'cards.json'),
+  path.join(appDir, 'src', 'data', 'cards.json'),
+  path.join(appDir, '..', 'src', 'data', 'cards.json'),
+];
+
+for (const p of candidatePaths) {
+  try {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && Object.keys(parsed).length > 0) {
+        cardsDeck = parsed;
+        console.log('[Bunker IT] Loaded cards database from disk at:', p);
+        break;
+      }
+    }
+  } catch (e) {
+    // Continue
   }
-} catch (e) {
-  console.error('[Bunker IT] Failed to load cards database:', e);
 }
+
+console.log('[Bunker IT] Active cards deck categories:', Object.keys(cardsDeck).length);
 
 // Helper to load session
 function loadSession() {
@@ -55,8 +71,11 @@ function saveSession(session: any) {
   }
 }
 
-// Helper to shuffle & draw
+// Helper to shuffle & draw safely
 function drawRandomSample<T>(array: T[], count: number): T[] {
+  if (!array || array.length === 0 || count <= 0) {
+    return [];
+  }
   const shuffled = [...array].sort(() => Math.random() - 0.5);
   if (count <= shuffled.length) {
     return shuffled.slice(0, count);
@@ -64,7 +83,12 @@ function drawRandomSample<T>(array: T[], count: number): T[] {
   // If pool smaller than count, fill with random picks
   const result: T[] = [...shuffled];
   while (result.length < count) {
-    result.push(shuffled[Math.floor(Math.random() * shuffled.length)]);
+    const picked = shuffled[Math.floor(Math.random() * shuffled.length)];
+    if (picked) {
+      result.push(picked);
+    } else {
+      break;
+    }
   }
   return result;
 }
@@ -72,9 +96,9 @@ function drawRandomSample<T>(array: T[], count: number): T[] {
 function getRandomCard(category: string) {
   const pool = cardsDeck[category] || [];
   if (!pool.length) {
-    return { title: 'Неизвестно', description: '' };
+    return { category, title: `${category} (Базовый)`, description: 'Информация засекречена' };
   }
-  return pool[Math.floor(Math.random() * pool.length)];
+  return pool[Math.floor(Math.random() * pool.length)] || { category, title: `${category} (Базовый)`, description: 'Информация засекречена' };
 }
 
 function generateGameSession(playerCount: number, perksPerPlayer: number) {
@@ -134,7 +158,10 @@ function generateGameSession(playerCount: number, perksPerPlayer: number) {
     const cards: any[] = [];
     for (let cIdx = 0; cIdx < playerCategories.length; cIdx++) {
       const cat = playerCategories[cIdx];
-      const drawn = drawnByCategory[cat][pIdx] || { title: 'Неизвестно', description: '' };
+      const drawn = (drawnByCategory[cat] && drawnByCategory[cat][pIdx]) || {
+        title: `${cat} ${pIdx + 1}`,
+        description: 'Характеристика участника экспедиции',
+      };
       cards.push({
         id: `p${pIdx + 1}_card${cIdx + 1}`,
         label: cat,
@@ -152,8 +179,8 @@ function generateGameSession(playerCount: number, perksPerPlayer: number) {
       cards.push({
         id: `p${pIdx + 1}_perk${perkNum + 1}`,
         label: `Перк ${perkNum + 1}`,
-        title: perk.title,
-        description: perk.description,
+        title: perk?.title || `Перк ${perkNum + 1}`,
+        description: perk?.description || 'Специальное игровое действие',
         perk_used: false,
         revealed: false,
       });
@@ -198,12 +225,17 @@ async function startServer() {
 
   // Generate new game session
   app.post('/api/session/generate', (req, res) => {
-    const playerCount = Math.max(2, Math.min(30, Number(req.body.playerCount) || 6));
-    const perksPerPlayer = Math.max(0, Math.min(5, Number(req.body.perksPerPlayer) ?? 2));
+    try {
+      const playerCount = Math.max(2, Math.min(30, Number(req.body?.playerCount) || 6));
+      const perksPerPlayer = Math.max(0, Math.min(5, Number(req.body?.perksPerPlayer) ?? 2));
 
-    const newSession = generateGameSession(playerCount, perksPerPlayer);
-    saveSession(newSession);
-    res.json({ session: newSession });
+      const newSession = generateGameSession(playerCount, perksPerPlayer);
+      saveSession(newSession);
+      res.json({ session: newSession });
+    } catch (err: any) {
+      console.error('[Bunker IT] Session generation error:', err);
+      res.status(500).json({ error: err?.message || 'Ошибка генерации партии' });
+    }
   });
 
   // Clear current game session
