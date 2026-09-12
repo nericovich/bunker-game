@@ -47,6 +47,14 @@ function loadSession() {
       const raw = fs.readFileSync(STATE_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed?.cleared) return null;
+      if (parsed && !parsed.cleared && !parsed.timer) {
+        parsed.timer = {
+          initialSeconds: 60,
+          remainingSeconds: 60,
+          endsAt: null,
+          isRunning: false,
+        };
+      }
       return parsed;
     } else {
       // Auto-initialize an initial game session so preview works immediately
@@ -183,6 +191,12 @@ function generateGameSession(playerCount: number, perksPerPlayer: number) {
       },
     ],
     players: [] as any[],
+    timer: {
+      initialSeconds: 60,
+      remainingSeconds: 60,
+      endsAt: null,
+      isRunning: false,
+    },
   };
 
   // Track used card titles across all players so characteristics NEVER overlap
@@ -335,6 +349,59 @@ async function startServer() {
       });
       saveSession(session);
     }
+    res.json({ session });
+  });
+
+  // Timer sync control endpoint (host-controlled)
+  app.post('/api/session/timer', (req, res) => {
+    const { action, initialSeconds, remainingSeconds } = req.body;
+    const session = loadSession();
+    if (!session) return res.status(404).json({ error: 'No active session' });
+
+    if (!session.timer) {
+      session.timer = {
+        initialSeconds: 60,
+        remainingSeconds: 60,
+        endsAt: null,
+        isRunning: false,
+      };
+    }
+
+    const now = Date.now();
+
+    if (action === 'start') {
+      const currentRemaining = typeof remainingSeconds === 'number'
+        ? remainingSeconds
+        : (session.timer.remainingSeconds ?? session.timer.initialSeconds ?? 60);
+      const secs = currentRemaining > 0 ? currentRemaining : (session.timer.initialSeconds || 60);
+      session.timer.isRunning = true;
+      session.timer.endsAt = now + secs * 1000;
+      session.timer.remainingSeconds = secs;
+    } else if (action === 'pause') {
+      if (session.timer.isRunning && session.timer.endsAt) {
+        const left = Math.max(0, Math.ceil((session.timer.endsAt - now) / 1000));
+        session.timer.remainingSeconds = left;
+      } else if (typeof remainingSeconds === 'number') {
+        session.timer.remainingSeconds = remainingSeconds;
+      }
+      session.timer.isRunning = false;
+      session.timer.endsAt = null;
+    } else if (action === 'reset') {
+      const initSec = initialSeconds || session.timer.initialSeconds || 60;
+      session.timer.isRunning = false;
+      session.timer.endsAt = null;
+      session.timer.remainingSeconds = initSec;
+      session.timer.initialSeconds = initSec;
+    } else if (action === 'set_time') {
+      const newSec = Math.max(5, Math.min(600, Number(initialSeconds) || 60));
+      session.timer.initialSeconds = newSec;
+      session.timer.remainingSeconds = newSec;
+      session.timer.isRunning = false;
+      session.timer.endsAt = null;
+    }
+
+    session.timer.updatedAt = now;
+    saveSession(session);
     res.json({ session });
   });
 

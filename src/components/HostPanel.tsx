@@ -3,6 +3,9 @@ import { Card, GameSession, Player } from '../types';
 import { WorldSection } from './WorldSection';
 import { PlayerCardItem } from './PlayerCardItem';
 import { PerkActionModal } from './PerkActionModal';
+import { RoundTimer } from './RoundTimer';
+import { QuickDistributeModal } from './QuickDistributeModal';
+import { formatPlayerDossier, copyTextToClipboard } from '../utils/cardDistribution';
 import {
   RotateCw,
   Trash2,
@@ -20,6 +23,10 @@ import {
   Info,
   UserPlus,
   X,
+  Clock,
+  Copy,
+  Send,
+  FileText,
 } from 'lucide-react';
 
 interface HostPanelProps {
@@ -30,6 +37,10 @@ interface HostPanelProps {
   onToggleCard: (cardId: string, revealed?: boolean, perkUsed?: boolean) => Promise<void>;
   onPlayerCardsAll: (playerId: string, revealed: boolean) => Promise<void>;
   onUpdateSession: (updatedSession: GameSession) => Promise<void>;
+  onUpdateTimer?: (
+    action: 'start' | 'pause' | 'reset' | 'set_time',
+    payload?: { initialSeconds?: number; remainingSeconds?: number }
+  ) => Promise<void>;
 }
 
 export function HostPanel({
@@ -40,6 +51,7 @@ export function HostPanel({
   onToggleCard,
   onPlayerCardsAll,
   onUpdateSession,
+  onUpdateTimer,
 }: HostPanelProps) {
   const [playerCount, setPlayerCount] = useState<number>(session?.playerCount || 6);
   const [perksPerPlayer, setPerksPerPlayer] = useState<number>(session?.perksPerPlayer ?? 2);
@@ -52,6 +64,26 @@ export function HostPanel({
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [isRemovingPlayerId, setIsRemovingPlayerId] = useState<string | null>(null);
+
+  // Quick card distribution state
+  const [isDistributeModalOpen, setIsDistributeModalOpen] = useState(false);
+  const [distributeInitialPlayerId, setDistributeInitialPlayerId] = useState<string | null>(null);
+  const [copiedPlayerId, setCopiedPlayerId] = useState<string | null>(null);
+
+  const handleCopyPlayerDossier = async (player: Player) => {
+    const text = formatPlayerDossier(player, session);
+    const success = await copyTextToClipboard(text);
+    if (success) {
+      setCopiedPlayerId(player.id);
+      setActionNotice(`Карты игрока «${player.name}» скопированы в буфер обмена!`);
+      setTimeout(() => setCopiedPlayerId(null), 2500);
+    }
+  };
+
+  const handleOpenDistribute = (playerId?: string) => {
+    setDistributeInitialPlayerId(playerId || null);
+    setIsDistributeModalOpen(true);
+  };
 
   const handleAddPlayer = async () => {
     if (!session) return;
@@ -340,6 +372,15 @@ export function HostPanel({
         </div>
       ) : (
         <>
+          {/* Host Timer Controls (exclusive to Host) */}
+          <div className="bg-slate-900/90 border border-amber-900/60 rounded-2xl p-4 shadow-lg backdrop-blur-md">
+            <RoundTimer
+              role="host"
+              timer={session.timer}
+              onUpdateTimer={onUpdateTimer}
+            />
+          </div>
+
           {/* World Section */}
           <WorldSection
             worldCards={session.world}
@@ -382,13 +423,24 @@ export function HostPanel({
                 </span>
               </div>
 
-              <button
-                onClick={() => setIsAddPlayerModalOpen(true)}
-                className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950 transition-all cursor-pointer hover:scale-[1.02]"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>Добавить игрока в партию</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleOpenDistribute()}
+                  className="py-2 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-800/70 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer hover:scale-[1.02]"
+                  title="Быстрая раздача карт текстом для Telegram / Discord"
+                >
+                  <Copy className="w-4 h-4 text-rose-400" />
+                  <span>Быстрая раздача карт (Текст)</span>
+                </button>
+
+                <button
+                  onClick={() => setIsAddPlayerModalOpen(true)}
+                  className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950 transition-all cursor-pointer hover:scale-[1.02]"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Добавить игрока</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -479,17 +531,33 @@ export function HostPanel({
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => onPlayerCardsAll(player.id, true)}
-                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 font-semibold text-[11px] flex items-center gap-1 transition-colors"
+                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 font-semibold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                           >
                             <CheckCheck className="w-3 h-3" />
                             <span>Открыть все</span>
                           </button>
                           <button
                             onClick={() => onPlayerCardsAll(player.id, false)}
-                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px] flex items-center gap-1 transition-colors"
+                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                           >
                             <EyeOff className="w-3 h-3" />
                             <span>Закрыть все</span>
+                          </button>
+                          <button
+                            onClick={() => handleCopyPlayerDossier(player)}
+                            className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                              copiedPlayerId === player.id
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-900/50'
+                            }`}
+                            title="Скопировать карты игрока в буфер обмена для быстрой отправки в чат"
+                          >
+                            {copiedPlayerId === player.id ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3 text-rose-400" />
+                            )}
+                            <span>{copiedPlayerId === player.id ? 'Скопировано!' : 'Раздать карты'}</span>
                           </button>
                         </div>
 
@@ -649,6 +717,14 @@ export function HostPanel({
           </div>
         </div>
       )}
+
+      {/* Quick Cards Distribution Modal */}
+      <QuickDistributeModal
+        isOpen={isDistributeModalOpen}
+        onClose={() => setIsDistributeModalOpen(false)}
+        session={session}
+        initialPlayerId={distributeInitialPlayerId}
+      />
     </div>
   );
 }

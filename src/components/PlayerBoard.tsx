@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Player, WorldCard } from '../types';
+import { GameTimer, Player, WorldCard } from '../types';
 import { WorldSection } from './WorldSection';
 import { PlayerCardItem } from './PlayerCardItem';
-import { ChevronDown, ChevronUp, User, ShieldCheck, Skull, RefreshCw } from 'lucide-react';
+import { RoundTimer } from './RoundTimer';
+import { ChevronDown, ChevronUp, User, ShieldCheck, Skull, RefreshCw, Clock } from 'lucide-react';
 
 interface PlayerBoardProps {
   world: WorldCard[];
   players: Player[];
+  timer?: GameTimer;
   onRefresh?: () => void;
   isRefreshing?: boolean;
 }
@@ -14,6 +16,7 @@ interface PlayerBoardProps {
 export function PlayerBoard({
   world,
   players,
+  timer,
   onRefresh,
   isRefreshing = false,
 }: PlayerBoardProps) {
@@ -77,6 +80,13 @@ export function PlayerBoard({
           </div>
         </div>
       </div>
+
+      {/* Synchronized Round Timer for Players (Read-only) */}
+      {timer && (timer.isRunning || (timer.remainingSeconds !== undefined && timer.remainingSeconds < timer.initialSeconds)) && (
+        <div className="bg-slate-900/90 border border-amber-800/80 rounded-2xl p-4 shadow-lg">
+          <RoundTimer role="player" timer={timer} />
+        </div>
+      )}
 
       {/* World Cards */}
       <WorldSection worldCards={world} role="player" />

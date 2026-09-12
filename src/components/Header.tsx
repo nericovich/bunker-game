@@ -1,6 +1,6 @@
-import React from 'react';
-import { Role } from '../types';
-import { Shield, BookOpen, Clock, RefreshCw, Radio } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { GameTimer, Role } from '../types';
+import { Shield, BookOpen, Clock, RefreshCw, Radio, Lock } from 'lucide-react';
 
 interface HeaderProps {
   role: Role;
@@ -11,6 +11,7 @@ interface HeaderProps {
   onRefresh: () => void;
   isRefreshing: boolean;
   generationId?: number;
+  timer?: GameTimer;
 }
 
 export function Header({
@@ -22,7 +23,31 @@ export function Header({
   onRefresh,
   isRefreshing,
   generationId,
+  timer,
 }: HeaderProps) {
+  const isHost = role === 'host';
+  const [displaySeconds, setDisplaySeconds] = useState<number>(60);
+
+  useEffect(() => {
+    if (!timer) return;
+    const update = () => {
+      if (timer.isRunning && timer.endsAt) {
+        const diff = Math.ceil((timer.endsAt - Date.now()) / 1000);
+        setDisplaySeconds(Math.max(0, diff));
+      } else {
+        setDisplaySeconds(timer.remainingSeconds ?? timer.initialSeconds ?? 60);
+      }
+    };
+    update();
+    const interval = setInterval(update, 500);
+    return () => clearInterval(interval);
+  }, [timer?.endsAt, timer?.isRunning, timer?.remainingSeconds, timer?.initialSeconds]);
+
+  const formatTime = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
   return (
     <header className="sticky top-0 z-40 bg-slate-950/90 border-b border-slate-800/90 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
@@ -78,18 +103,32 @@ export function Header({
 
         {/* Action Tools */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={onToggleTimer}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border cursor-pointer ${
-              showTimer
-                ? 'bg-amber-950/80 text-amber-300 border-amber-800/80'
-                : 'bg-slate-900 hover:bg-slate-850 text-slate-300 border-slate-800 hover:border-slate-700'
-            }`}
-            title="Переключить таймер раунда"
-          >
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Таймер</span>
-          </button>
+          {isHost ? (
+            <button
+              onClick={onToggleTimer}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border cursor-pointer ${
+                showTimer
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-800/80'
+                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 border-slate-800 hover:border-slate-700'
+              }`}
+              title="Переключить таймер раунда"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Таймер</span>
+            </button>
+          ) : timer && (timer.isRunning || (timer.remainingSeconds !== undefined && timer.remainingSeconds < timer.initialSeconds)) ? (
+            <div
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold font-mono flex items-center gap-1.5 border ${
+                timer.isRunning
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-800/80 animate-pulse'
+                  : 'bg-slate-900 text-slate-300 border-slate-800'
+              }`}
+              title="Таймер раунда (управляется ведущим)"
+            >
+              <Clock className={`w-3.5 h-3.5 ${timer.isRunning ? 'text-amber-400' : 'text-slate-400'}`} />
+              <span>{formatTime(displaySeconds)}</span>
+            </div>
+          ) : null}
 
           <button
             onClick={onOpenDeck}

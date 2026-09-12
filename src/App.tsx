@@ -230,6 +230,68 @@ export default function App() {
     }
   };
 
+  // Synchronized Timer handler (Host-only control)
+  const handleUpdateTimer = async (
+    action: 'start' | 'pause' | 'reset' | 'set_time',
+    payload?: { initialSeconds?: number; remainingSeconds?: number }
+  ) => {
+    const now = Date.now();
+    // Optimistic local state update
+    setSession((prev) => {
+      if (!prev) return prev;
+      const currentTimer = prev.timer ? { ...prev.timer } : {
+        initialSeconds: 60,
+        remainingSeconds: 60,
+        endsAt: null,
+        isRunning: false,
+      };
+
+      if (action === 'start') {
+        const secs = payload?.remainingSeconds ?? currentTimer.remainingSeconds ?? currentTimer.initialSeconds ?? 60;
+        currentTimer.isRunning = true;
+        currentTimer.endsAt = now + secs * 1000;
+        currentTimer.remainingSeconds = secs;
+      } else if (action === 'pause') {
+        if (currentTimer.isRunning && currentTimer.endsAt) {
+          currentTimer.remainingSeconds = Math.max(0, Math.ceil((currentTimer.endsAt - now) / 1000));
+        } else if (payload?.remainingSeconds !== undefined) {
+          currentTimer.remainingSeconds = payload.remainingSeconds;
+        }
+        currentTimer.isRunning = false;
+        currentTimer.endsAt = null;
+      } else if (action === 'reset') {
+        const initSec = payload?.initialSeconds || currentTimer.initialSeconds || 60;
+        currentTimer.isRunning = false;
+        currentTimer.endsAt = null;
+        currentTimer.remainingSeconds = initSec;
+        currentTimer.initialSeconds = initSec;
+      } else if (action === 'set_time') {
+        const initSec = Math.max(5, Math.min(600, payload?.initialSeconds || 60));
+        currentTimer.initialSeconds = initSec;
+        currentTimer.remainingSeconds = initSec;
+        currentTimer.isRunning = false;
+        currentTimer.endsAt = null;
+      }
+      return { ...prev, timer: currentTimer };
+    });
+
+    try {
+      const res = await fetch('/api/session/timer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          initialSeconds: payload?.initialSeconds,
+          remainingSeconds: payload?.remainingSeconds,
+        }),
+      });
+      const data = await res.json();
+      if (data.session) setSession(data.session);
+    } catch (e) {
+      console.error('Failed to sync timer with server', e);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-rose-600 selection:text-white">
       {/* Top Navbar */}
@@ -242,13 +304,18 @@ export default function App() {
         onRefresh={() => fetchSession(true)}
         isRefreshing={isRefreshing}
         generationId={session?.generation_id}
+        timer={session?.timer}
       />
 
-      {/* Floating / Docked Timer Widget */}
-      {showTimer && (
+      {/* Floating Timer Widget (Host only) */}
+      {showTimer && role === 'host' && isHostAuthenticated && (
         <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 pt-3">
           <div className="max-w-md ml-auto">
-            <RoundTimer />
+            <RoundTimer
+              role="host"
+              timer={session?.timer}
+              onUpdateTimer={handleUpdateTimer}
+            />
           </div>
         </div>
       )}
@@ -288,6 +355,7 @@ export default function App() {
               onToggleCard={handleToggleCard}
               onPlayerCardsAll={handlePlayerCardsAll}
               onUpdateSession={handleUpdateSession}
+              onUpdateTimer={handleUpdateTimer}
             />
           )
         ) : (
@@ -321,6 +389,7 @@ export default function App() {
             <PlayerBoard
               world={session.world}
               players={session.players}
+              timer={session.timer}
               onRefresh={() => fetchSession(true)}
               isRefreshing={isRefreshing}
             />

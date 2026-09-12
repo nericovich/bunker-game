@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CARD_COLORS, isPerkApplicable, Role } from '../types';
-import { Check, RotateCcw, AlertTriangle, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { Check, RotateCcw, AlertTriangle, Eye, EyeOff, Sparkles, Copy } from 'lucide-react';
+import { formatSingleCard, copyTextToClipboard } from '../utils/cardDistribution';
 
 interface PlayerCardItemProps {
   key?: React.Key;
@@ -18,10 +19,20 @@ export function PlayerCardItem({
   onTogglePerk,
   onOpenPerkModal,
 }: PlayerCardItemProps) {
+  const [isCopied, setIsCopied] = useState(false);
   const isPerk = card.label.startsWith('Перк');
   const baseCategory = isPerk ? 'Перк' : card.label;
   const categoryColor = CARD_COLORS[baseCategory] || '#475569';
   const canApplyAuto = isPerkApplicable(card);
+
+  const handleCopy = async () => {
+    const text = formatSingleCard(card);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    }
+  };
 
   // Player view and hidden
   if (role === 'player' && !card.revealed) {
@@ -72,23 +83,40 @@ export function PlayerCardItem({
           )}
         </div>
 
-        {/* Host Reveal Toggle */}
-        {role === 'host' && onToggleReveal && (
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={card.revealed}
-              onChange={(e) => onToggleReveal(card.id, e.target.checked)}
-              className="w-3.5 h-3.5 rounded bg-slate-800 border-slate-700 text-rose-600 focus:ring-rose-500 focus:ring-offset-slate-900 cursor-pointer"
-            />
-            <span
-              className={`text-[11px] font-semibold ${
-                card.revealed ? 'text-emerald-400' : 'text-slate-500'
+        {/* Host Actions: Copy + Reveal Toggle */}
+        {role === 'host' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 transition-all ${
+                isCopied
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
+              title="Скопировать эту карту в текстовом формате"
             >
-              {card.revealed ? 'Открыто' : 'Закрыто'}
-            </span>
-          </label>
+              {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              <span>{isCopied ? 'Скопировано!' : 'Копия'}</span>
+            </button>
+
+            {onToggleReveal && (
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={card.revealed}
+                  onChange={(e) => onToggleReveal(card.id, e.target.checked)}
+                  className="w-3.5 h-3.5 rounded bg-slate-800 border-slate-700 text-rose-600 focus:ring-rose-500 focus:ring-offset-slate-900 cursor-pointer"
+                />
+                <span
+                  className={`text-[11px] font-semibold ${
+                    card.revealed ? 'text-emerald-400' : 'text-slate-500'
+                  }`}
+                >
+                  {card.revealed ? 'Открыто' : 'Закрыто'}
+                </span>
+              </label>
+            )}
+          </div>
         )}
       </div>
 

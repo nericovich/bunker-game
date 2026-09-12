@@ -37,6 +37,14 @@ export interface PerkActionPayload {
   minutesToAdd?: number;
 }
 
+export interface GameTimer {
+  initialSeconds: number;
+  remainingSeconds?: number;
+  endsAt: number | null;
+  isRunning: boolean;
+  updatedAt?: number;
+}
+
 export interface GameSession {
   generation_id: number;
   createdAt: string;
@@ -44,6 +52,7 @@ export interface GameSession {
   perksPerPlayer: number;
   world: WorldCard[];
   players: Player[];
+  timer?: GameTimer;
 }
 
 export interface DeckCard {
