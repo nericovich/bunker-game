@@ -232,8 +232,8 @@ export default function App() {
 
   // Synchronized Timer handler (Host-only control)
   const handleUpdateTimer = async (
-    action: 'start' | 'pause' | 'reset' | 'set_time',
-    payload?: { initialSeconds?: number; remainingSeconds?: number }
+    action: 'start' | 'pause' | 'reset' | 'set_time' | 'add_time',
+    payload?: { initialSeconds?: number; remainingSeconds?: number; deltaSeconds?: number; startImmediately?: boolean }
   ) => {
     const now = Date.now();
     // Optimistic local state update
@@ -266,11 +266,29 @@ export default function App() {
         currentTimer.remainingSeconds = initSec;
         currentTimer.initialSeconds = initSec;
       } else if (action === 'set_time') {
-        const initSec = Math.max(5, Math.min(600, payload?.initialSeconds || 60));
+        const initSec = Math.max(5, Math.min(3600, payload?.initialSeconds || 60));
         currentTimer.initialSeconds = initSec;
         currentTimer.remainingSeconds = initSec;
-        currentTimer.isRunning = false;
-        currentTimer.endsAt = null;
+        if (payload?.startImmediately) {
+          currentTimer.isRunning = true;
+          currentTimer.endsAt = now + initSec * 1000;
+        } else {
+          currentTimer.isRunning = false;
+          currentTimer.endsAt = null;
+        }
+      } else if (action === 'add_time') {
+        const delta = payload?.deltaSeconds || 30;
+        if (currentTimer.isRunning && currentTimer.endsAt) {
+          currentTimer.endsAt += delta * 1000;
+          const left = Math.max(0, Math.ceil((currentTimer.endsAt - now) / 1000));
+          currentTimer.remainingSeconds = left;
+          currentTimer.initialSeconds = Math.max(currentTimer.initialSeconds, left);
+        } else {
+          const cur = currentTimer.remainingSeconds ?? currentTimer.initialSeconds ?? 60;
+          const newSec = Math.max(5, Math.min(3600, cur + delta));
+          currentTimer.remainingSeconds = newSec;
+          currentTimer.initialSeconds = Math.max(currentTimer.initialSeconds, newSec);
+        }
       }
       return { ...prev, timer: currentTimer };
     });
@@ -283,6 +301,8 @@ export default function App() {
           action,
           initialSeconds: payload?.initialSeconds,
           remainingSeconds: payload?.remainingSeconds,
+          deltaSeconds: payload?.deltaSeconds,
+          startImmediately: payload?.startImmediately,
         }),
       });
       const data = await res.json();

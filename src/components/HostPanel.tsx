@@ -38,8 +38,8 @@ interface HostPanelProps {
   onPlayerCardsAll: (playerId: string, revealed: boolean) => Promise<void>;
   onUpdateSession: (updatedSession: GameSession) => Promise<void>;
   onUpdateTimer?: (
-    action: 'start' | 'pause' | 'reset' | 'set_time',
-    payload?: { initialSeconds?: number; remainingSeconds?: number }
+    action: 'start' | 'pause' | 'reset' | 'set_time' | 'add_time',
+    payload?: { initialSeconds?: number; remainingSeconds?: number; deltaSeconds?: number; startImmediately?: boolean }
   ) => Promise<void>;
 }
 

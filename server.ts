@@ -393,11 +393,29 @@ async function startServer() {
       session.timer.remainingSeconds = initSec;
       session.timer.initialSeconds = initSec;
     } else if (action === 'set_time') {
-      const newSec = Math.max(5, Math.min(600, Number(initialSeconds) || 60));
+      const newSec = Math.max(5, Math.min(3600, Number(initialSeconds) || 60));
       session.timer.initialSeconds = newSec;
       session.timer.remainingSeconds = newSec;
-      session.timer.isRunning = false;
-      session.timer.endsAt = null;
+      if (req.body.startImmediately) {
+        session.timer.isRunning = true;
+        session.timer.endsAt = now + newSec * 1000;
+      } else {
+        session.timer.isRunning = false;
+        session.timer.endsAt = null;
+      }
+    } else if (action === 'add_time') {
+      const deltaSec = Number(req.body.deltaSeconds) || 30;
+      if (session.timer.isRunning && session.timer.endsAt) {
+        session.timer.endsAt += deltaSec * 1000;
+        const left = Math.max(0, Math.ceil((session.timer.endsAt - now) / 1000));
+        session.timer.remainingSeconds = left;
+        session.timer.initialSeconds = Math.max(session.timer.initialSeconds, left);
+      } else {
+        const cur = session.timer.remainingSeconds ?? session.timer.initialSeconds ?? 60;
+        const newSec = Math.max(5, Math.min(3600, cur + deltaSec));
+        session.timer.remainingSeconds = newSec;
+        session.timer.initialSeconds = Math.max(session.timer.initialSeconds, newSec);
+      }
     }
 
     session.timer.updatedAt = now;
